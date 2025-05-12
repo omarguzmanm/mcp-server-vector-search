@@ -37,8 +37,7 @@ def get_embeddings(prompt:str) -> list:
     Returns:
         list: The embedding vector for the input text.
     """
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    embeddings  = model.encode(prompt)
+    embeddings = model.encode(prompt)
     
     return embeddings.tolist()
 
