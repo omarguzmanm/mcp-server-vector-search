@@ -8,7 +8,6 @@ import sys
 import time
 from typing import Any, Optional
 import mcp.types as types
-from mcp.server.fastmcp import FastMCP
 from neo4j import (
     AsyncDriver,
     AsyncGraphDatabase,
