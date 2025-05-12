@@ -29,6 +29,8 @@ NEO4J_USERNAME=os.getenv("NEO4J_USERNAME")
 NEO4J_PASSWORD=os.getenv("NEO4J_PASSWORD")
 NEO4J_DATABASE=os.getenv("NEO4J_DATABASE")
 
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
 def get_embeddings(prompt:str) -> list:
     """
     Get the embedding for a given prompt.
