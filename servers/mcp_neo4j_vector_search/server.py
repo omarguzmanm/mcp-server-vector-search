@@ -18,11 +18,12 @@ from neo4j import (
 from neo4j.exceptions import DatabaseError
 from pydantic import Field
 import os
+from openai import OpenAI
+
 load_dotenv()
 
 logger = logging.getLogger("mcp-neo4j-vector-search")
-
-mcp = FastMCP("mcp-neo4j-vector-search")
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 NEO4J_URI=os.getenv("NEO4J_URI")
 NEO4J_USERNAME=os.getenv("NEO4J_USERNAME")
@@ -43,6 +44,25 @@ def get_embeddings(prompt:str) -> list:
     
     return embeddings.tolist()
 
+def get_open_ai_embeddings(text: str) -> list:
+    """
+    Generates an embedding for a given text.
+    Args:
+        text (str): The input text to be embedded.
+        Returns:
+        list: The embedding vector for the input text.
+    """
+    response = openai_client.embeddings.create(
+        input=[text],
+        model='text-embedding-3-small',
+    )
+    
+    prompt_embeddings = response.data[0].embedding
+
+    if not isinstance(prompt_embeddings, list) or len(prompt_embeddings) != 1536:
+        raise ValueError("The embedding must be a list of 1536 numbers")
+
+    return prompt_embeddings
 
 def healthcheck(db_url: str, username: str, password: str, database: str) -> None:
     """
@@ -189,40 +209,102 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
                 types.TextContent(type="text", text=f"Error: {e}\n{query}\n{params}")
             ]
 
+    async def vector_search_neo4j(
+        prompt: str = Field(
+            ..., description="The prompt to search for related nodes using similarity search"
+        ),
+    ):
+        """Search for the most similar nodes in the neo4j database using vector search."""
+        
+        prompt_embeddings = get_open_ai_embeddings(prompt)
+        
+        if len(prompt_embeddings) != 1536:  
+            raise ValueError(
+                f"Embedding dimension mismatch: Expected 1536, got {len(prompt_embeddings)}. "
+                "Ensure the model and Neo4j index dimensions match."
+            )
+        query = """
+            WITH $prompt_embeddings AS prompt_embeddings
+            CALL db.index.vector.queryNodes('embeddableIndex', 10, prompt_embeddings)
+            YIELD node, score
+            RETURN node.name as name, node.description as description, score
+            ORDER BY score DESC
+        """
+        
+        async with neo4j_driver.session(database=database) as session:
+            results = await session.execute_read(
+                _read, query, {"prompt_embeddings": prompt_embeddings}
+            )
+        
+        if not results:
+            logger.warning("No results found for the given prompt.")
+            return [types.TextContent(type="text", text="No results found.")]
+        
+        return results
+        
+        
+        
+        # logger.debug(f"Vector search query returned {len(results)} rows")
+        # return [
+        #     types.TextContent(
+        #         type="text",
+        #         text=json.dumps([r.data() for r in results.records], default=str),
+        #     )
+        # ]
+
+        # query_index = """
+        #     SHOW VECTOR INDEXES
+        # """
+        
+
     mcp.add_tool(get_neo4j_schema)
     mcp.add_tool(read_neo4j_cypher)
     mcp.add_tool(write_neo4j_cypher)
+    mcp.add_tool(vector_search_neo4j)
 
     return mcp
 
+neo4j_driver = AsyncGraphDatabase.driver(
+    NEO4J_URI,
+    auth=(
+        NEO4J_USERNAME,
+        NEO4J_PASSWORD,
+    ),
+)
+mcp = create_mcp_server(neo4j_driver, NEO4J_DATABASE)
 
-def main(
-    db_url: str,
-    username: str,
-    password: str,
-    database: str,
-) -> None:
-    logger.info("Starting MCP neo4j Server")
+# if __name__ == "__main__":
+#     mcp.run()
 
-    neo4j_driver = AsyncGraphDatabase.driver(
-        db_url,
-        auth=(
-            username,
-            password,
-        ),
-    )
+# mcp.run(transport="stdio")
 
-    mcp = create_mcp_server(neo4j_driver, database)
+# def main(
+#     db_url: str,
+#     username: str,a
+#     password: str,
+#     database: str,
+# ) -> None:
+#     logger.info("Starting MCP neo4j Server")
 
-    healthcheck(db_url, username, password, database)
+#     neo4j_driver = AsyncGraphDatabase.driver(
+#         db_url,
+#         auth=(
+#             username,
+#             password,
+#         ),
+#     )
 
-    mcp.run(transport="stdio")
+#     mcp = create_mcp_server(neo4j_driver, database)
+
+#     healthcheck(db_url, username, password, database)
+
+#     mcp.run(transport="stdio")
 
 
-if __name__ == "__main__":
-    main(
-        db_url=NEO4J_URI,
-        username=NEO4J_USERNAME,
-        password=NEO4J_PASSWORD,
-        database=NEO4J_DATABASE,
-    )
+# if __name__ == "__main__":
+#     main(
+#         db_url=NEO4J_URI,
+#         username=NEO4J_USERNAME,
+#         password=NEO4J_PASSWORD,
+#         database=NEO4J_DATABASE,
+#     )
