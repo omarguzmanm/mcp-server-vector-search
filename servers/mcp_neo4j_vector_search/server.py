@@ -23,7 +23,6 @@ from openai import OpenAI
 load_dotenv()
 
 logger = logging.getLogger("mcp-neo4j-vector-search")
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 NEO4J_URI=os.getenv("NEO4J_URI")
 NEO4J_USERNAME=os.getenv("NEO4J_USERNAME")
@@ -44,7 +43,7 @@ def get_embeddings(prompt:str) -> list:
     
     return embeddings.tolist()
 
-def get_open_ai_embeddings(text: str) -> list:
+def get_open_ai_embeddings(text: str, client: OpenAI) -> list:
     """
     Generates an embedding for a given text.
     Args:
@@ -52,7 +51,7 @@ def get_open_ai_embeddings(text: str) -> list:
         Returns:
         list: The embedding vector for the input text.
     """
-    response = openai_client.embeddings.create(
+    response = client.embeddings.create(
         input=[text],
         model='text-embedding-3-small',
     )
@@ -124,8 +123,9 @@ def _is_write_query(query: str) -> bool:
     )
 
 
-def create_mcp_server(neo4j_driver: AsyncDriver, database: str = "neo4j") -> FastMCP:
+def create_mcp_server(neo4j_driver: AsyncDriver, api_key: str, database: str = "neo4j") -> FastMCP:
     mcp: FastMCP = FastMCP("mcp-neo4j-vector-search", dependencies=["neo4j", "pydantic"])
+    openai_client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
 
     async def get_neo4j_schema() -> list[types.TextContent]:
         """List all node, their attributes and their relationships to other nodes in the neo4j database.
@@ -216,7 +216,7 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
     ) -> list[types.TextContent]:
         """Search for the most similar nodes in the neo4j database using vector search."""
         
-        prompt_embeddings = get_open_ai_embeddings(prompt)
+        prompt_embeddings = get_open_ai_embeddings(prompt, openai_client)
         
         if len(prompt_embeddings) != 1536:  
             raise ValueError(
@@ -254,6 +254,7 @@ def main(
     username: str,
     password: str,
     database: str,
+    api_key: str,
 ) -> None:
     logger.info("Starting MCP neo4j Server")
 
@@ -265,7 +266,7 @@ def main(
         ),
     )
 
-    mcp = create_mcp_server(neo4j_driver, database)
+    mcp = create_mcp_server(neo4j_driver, api_key, database)
 
     healthcheck(db_url, username, password, database)
 
