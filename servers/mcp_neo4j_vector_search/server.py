@@ -125,7 +125,7 @@ def _is_write_query(query: str) -> bool:
 
 
 def create_mcp_server(neo4j_driver: AsyncDriver, database: str = "neo4j") -> FastMCP:
-    mcp: FastMCP = FastMCP("mcp-neo4j-cypher", dependencies=["neo4j", "pydantic"])
+    mcp: FastMCP = FastMCP("mcp-neo4j-vector-search", dependencies=["neo4j", "pydantic"])
 
     async def get_neo4j_schema() -> list[types.TextContent]:
         """List all node, their attributes and their relationships to other nodes in the neo4j database.
@@ -213,7 +213,7 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
         prompt: str = Field(
             ..., description="The prompt to search for related nodes using similarity search"
         ),
-    ):
+    ) -> list[types.TextContent]:
         """Search for the most similar nodes in the neo4j database using vector search."""
         
         prompt_embeddings = get_open_ai_embeddings(prompt)
@@ -242,21 +242,6 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
         
         return results
         
-        
-        
-        # logger.debug(f"Vector search query returned {len(results)} rows")
-        # return [
-        #     types.TextContent(
-        #         type="text",
-        #         text=json.dumps([r.data() for r in results.records], default=str),
-        #     )
-        # ]
-
-        # query_index = """
-        #     SHOW VECTOR INDEXES
-        # """
-        
-
     mcp.add_tool(get_neo4j_schema)
     mcp.add_tool(read_neo4j_cypher)
     mcp.add_tool(write_neo4j_cypher)
@@ -264,47 +249,28 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
 
     return mcp
 
-neo4j_driver = AsyncGraphDatabase.driver(
-    NEO4J_URI,
-    auth=(
-        NEO4J_USERNAME,
-        NEO4J_PASSWORD,
-    ),
-)
-mcp = create_mcp_server(neo4j_driver, NEO4J_DATABASE)
+def main(
+    db_url: str,
+    username: str,
+    password: str,
+    database: str,
+) -> None:
+    logger.info("Starting MCP neo4j Server")
 
-# if __name__ == "__main__":
-#     mcp.run()
+    neo4j_driver = AsyncGraphDatabase.driver(
+        db_url,
+        auth=(
+            username,
+            password,
+        ),
+    )
 
-# mcp.run(transport="stdio")
+    mcp = create_mcp_server(neo4j_driver, database)
 
-# def main(
-#     db_url: str,
-#     username: str,a
-#     password: str,
-#     database: str,
-# ) -> None:
-#     logger.info("Starting MCP neo4j Server")
+    healthcheck(db_url, username, password, database)
 
-#     neo4j_driver = AsyncGraphDatabase.driver(
-#         db_url,
-#         auth=(
-#             username,
-#             password,
-#         ),
-#     )
-
-#     mcp = create_mcp_server(neo4j_driver, database)
-
-#     healthcheck(db_url, username, password, database)
-
-#     mcp.run(transport="stdio")
+    mcp.run(transport="stdio")
 
 
-# if __name__ == "__main__":
-#     main(
-#         db_url=NEO4J_URI,
-#         username=NEO4J_USERNAME,
-#         password=NEO4J_PASSWORD,
-#         database=NEO4J_DATABASE,
-#     )
+if __name__ == "__main__":
+    main()
